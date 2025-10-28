@@ -1130,7 +1130,8 @@ def min_cap_req(settings: dict) -> pd.DataFrame:
         ):
             settings["generator_columns"].append(cap_tag)
 
-        c_num.append(cap_tag.split("_")[1])
+        # cap_tag should always start with MinCapTag_, but we don't check
+        c_num.append(cap_tag.split("_", 1)[1])
         description.append(values.get("description"))
         min_mw.append(values.get("min_mw"))
 
@@ -1190,7 +1191,7 @@ def max_cap_req(settings: dict) -> pd.DataFrame:
         ):
             settings["generator_columns"].append(cap_tag)
 
-        c_num.append(cap_tag.split("_")[1])
+        c_num.append(cap_tag.split("_", 1)[1])
         description.append(values.get("description"))
         max_mw.append(values.get("max_mw"))
 
