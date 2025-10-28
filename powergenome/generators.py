@@ -668,12 +668,15 @@ def label_small_hydro(df, settings, by=["plant_id_eia"]):
     return df
 
 
-def load_generator_860_data(pudl_engine, data_years=[2017]):
+def load_generator_860_data(settings, pudl_engine, data_years=[2017]):
     """
-    Load EIA 860 generator data from the PUDL database
+    Load EIA 860 generator data from the PUDL database; filter out any proposed
+    generators whose status codes aren't in settings["proposed_status_included"]
 
     Parameters
     ----------
+    settings : dict
+        User-defined parameters from a settings file
     pudl_engine : sqlalchemy.Engine
         A sqlalchemy connection for use by pandas
     data_years : list, optional
@@ -694,9 +697,19 @@ def load_generator_860_data(pudl_engine, data_years=[2017]):
         sql=sql,
         con=pudl_engine,
         params=data_years,
-        parse_dates=["report_date", "planned_retirement_date"],
+        parse_dates=[
+            "report_date",
+            "planned_retirement_date",
+            "current_planned_generator_operating_date",
+        ],
     )
-
+    # remove proposed gens that the user considers too uncertain
+    standard = gens_860.query("operational_status != 'proposed'")
+    proposed = gens_860.query("operational_status == 'proposed'")
+    proposed = filter_op_status_codes(
+        proposed, settings.get("proposed_status_included")
+    )
+    gens_860 = pd.concat([standard, proposed], ignore_index=True)
     return gens_860
 
 
@@ -768,6 +781,8 @@ def supplement_generator_860_data(
             "switch_oil_gas",
             "technology_description",
             "time_cold_shutdown_full_load_code",
+            "current_planned_operating_date",
+            "current_planned_generator_operating_date",
             "planned_retirement_date",
             "prime_mover_code",
         ]
@@ -1766,7 +1781,7 @@ def load_860m(settings: dict) -> Dict[str, pd.DataFrame]:
 def filter_op_status_codes(
     df: pd.DataFrame, proposed_status_included: Union[List[str], None]
 ) -> pd.DataFrame:
-    """Filter a planned 860m sheet to only include desired operational status codes.
+    """Filter a planned 860 table or 860m sheet to only include desired operational status codes.
     Used to filter out projects that are still early in the pipeline and might not be built.
 
     If proposed_status_included is None, included all proposed plants. Will warn user
@@ -1775,12 +1790,14 @@ def filter_op_status_codes(
     Parameters
     ----------
     df : pd.DataFrame
-        EIA860m planned generators. Includes the column "operational_status_code".
+        EIA860m planned generators or EIA 860 generators. Includes the column
+        "operational_status_code".
     proposed_status_included : Union[List[str], None]
-        List of status codes for proposed generators that should be included in the model.
-        Examples include "V" (Under construction, more than 50 percent complete),
-        "TS" (Construction complete, but not yet in commercial operation), "U", (Under
-        construction, less than or equal to 50 percent complete), etc.
+        List of status codes for proposed generators that should be included in
+        the model. Examples include "V" (Under construction, more than 50
+        percent complete), "TS" (Construction complete, but not yet in
+        commercial operation), "U", (Under construction, less than or equal to
+        50 percent complete), etc.
 
     Returns
     -------
@@ -1797,7 +1814,8 @@ def filter_op_status_codes(
     if invalid_user_codes:
         logger.warning(
             f"The operational status codes {invalid_user_codes} included in the "
-            "settings parameter 'proposed_status_included' do not appear in EIA 860m.\n"
+            "settings parameter 'proposed_status_included' do not appear in EIA "
+            "860 or 860m table.\n"
             f"Valid status codes from 'operational_status_code' are {valid_status_codes}"
         )
     return df.loc[df["operational_status_code"].isin(proposed_status_included), :]
@@ -2942,7 +2960,9 @@ class GeneratorClusters:
         if self.current_gens:
             self.data_years = self.settings.get("eia_data_years") or []
 
-            self.gens_860 = load_generator_860_data(self.pudl_engine, self.data_years)
+            self.gens_860 = load_generator_860_data(
+                self.settings, self.pudl_engine, self.data_years
+            )
             self.gens_entity = pd.read_sql_table(
                 "generators_entity_eia", self.pudl_engine
             )
@@ -3191,7 +3211,19 @@ class GeneratorClusters:
                 self.settings.get("capacity_col", "capacity_mw"),
                 self.settings.get("retirement_ages", {}),
                 self.settings.get("additional_retirements"),
-                age_col="original_planned_operating_date",
+                # gets converted to current_planned_generator_operating_date
+                # within label_retirement_year if needed
+                age_col="current_planned_operating_date",  # from gens_860
+            )
+            .pipe(
+                label_retirement_year,
+                self.settings["model_year"],
+                self.settings.get("capacity_col", "capacity_mw"),
+                self.settings.get("retirement_ages", {}),
+                self.settings.get("additional_retirements"),
+                # gets converted to original_planned_generator_operating_date
+                # within label_retirement_year if needed
+                age_col="original_planned_operating_date",  # from gens_entity
             )
             .pipe(label_small_hydro, self.settings, by=["plant_id_eia"])
             .pipe(
@@ -3321,7 +3353,22 @@ class GeneratorClusters:
                     self.settings.get("retirement_ages", {}),
                     self.settings.get("additional_retirements"),
                 )
+                .pipe(
+                    label_retirement_year,
+                    self.settings["model_year"],
+                    self.settings.get("capacity_col", "capacity_mw"),
+                    self.settings.get("retirement_ages", {}),
+                    self.settings.get("additional_retirements"),
+                    age_col="planned_operating_year",
+                )
             )
+            # make sure retirement_year was assigned; otherwise these will fail the
+            # test for self.units_model.retirement_year > self.settings["model_year"]
+            # and be immediately retired.
+            assert (
+                "retirement_year" in self.proposed_gens.columns
+                and self.proposed_gens["retirement_year"].notna().all()
+            ), "Some proposed gens from 860m were not assigned retirement years"
             self.new_860m_gens = (
                 import_new_generators(
                     operating_860m=self.operating_860m,
@@ -3345,7 +3392,19 @@ class GeneratorClusters:
                     self.settings.get("retirement_ages", {}),
                     self.settings.get("additional_retirements"),
                 )
+                .pipe(
+                    label_retirement_year,
+                    self.settings["model_year"],
+                    self.settings.get("capacity_col", "capacity_mw"),
+                    self.settings.get("retirement_ages", {}),
+                    self.settings.get("additional_retirements"),
+                    age_col="operating_year",
+                )
             )
+            assert (
+                "retirement_year" in self.new_860m_gens.columns
+                and self.new_860m_gens["retirement_year"].notna().all()
+            ), "Some new gens from 860m were not assigned retirement years"
             # Add new/proposed generators to plant_region_map
             self.plant_region_map = pd.concat(
                 [
