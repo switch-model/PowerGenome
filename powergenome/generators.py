@@ -2881,26 +2881,13 @@ def load_demand_response_efs_profile(
     return dr_profile
 
 
-def add_860m_storage_mwh(
-    gen_df: pd.DataFrame, operating_860m: pd.DataFrame, storage_techs: List[str] = None
-) -> pd.DataFrame:
+def add_860m_storage_mwh(gen_df: pd.DataFrame, gen_860m: pd.DataFrame) -> pd.DataFrame:
+    """Update gen_df with capacity_mwh from gen_860m if present"""
+
     idx_cols = ["plant_id_eia", "generator_id"]
-    gen_df = gen_df.set_index(idx_cols)
-
-    if not storage_techs:
-        storage_techs = [
-            "Batteries",
-            "Natural Gas with Compressed Air Storage",
-            "Flywheels",
-        ]
-
-    storage_860m = operating_860m.loc[
-        operating_860m.technology_description.isin(storage_techs), :
-    ].set_index(idx_cols)
-    gen_df.loc[storage_860m.index, "capacity_mwh"] = storage_860m["capacity_mwh"]
-    # gen_df = pd.merge(
-    #     gen_df, storage_860m[idx_cols + ["capacity_mwh"]], how="left", on=idx_cols
-    # )
+    storage_860m = gen_860m.loc[gen_860m["capacity_mwh"].notna(), :].set_index(idx_cols)
+    gen_df = gen_df.copy().set_index(idx_cols)
+    gen_df.update(storage_860m["capacity_mwh"])
 
     return gen_df.reset_index()
 
@@ -3438,8 +3425,9 @@ class GeneratorClusters:
         if self.supplement_with_860m:
             self.units_model = add_860m_storage_mwh(
                 self.units_model,
-                self.new_860m_gens.reset_index(),
-                storage_techs=["Batteries"],
+                # use 860m for all generators if available, since it's more up-to-date
+                # note: planned_860m doesn't have MWh values as of 2025, but could in future
+                pd.concat([self.operating_860m, self.planned_860m], ignore_index=True),
             )
         else:
             self.units_model["capacity_mwh"] = 0
