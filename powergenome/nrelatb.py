@@ -1520,13 +1520,22 @@ def add_renewables_clusters(
         raise ValueError(
             f"NREL ATB technologies are not unique: {df['technology'].to_list()}"
         )
-    atb_map = {
-        x: map_nrel_atb_technology(x.split("_")[0], x.split("_")[1])
-        for x in df["technology"]
-    }
-    mask = df["technology"].isin([tech for tech, match in atb_map.items() if match]) & (
-        df["region"] == region
+    # find all techs for which user has provided clusters
+    cluster_techs = set(
+        c["technology"] for c in settings.get("renewables_clusters", [])
     )
+    # make map from ATB technology to cluster technology
+    atb_map = {}
+    for x in df["technology"]:
+        tech, detail = x.lower().split("_")[:2]
+        info = map_nrel_atb_technology(tech, detail)
+        if not info and tech in cluster_techs:
+            # Assign placeholder for user-defined tech for which they have
+            # provided clusters
+            info = {"technology": tech}
+        if info:
+            atb_map[x] = info
+    mask = df["technology"].isin(atb_map) & (df["region"] == region)
     cdfs = []
     if region in (settings.get("region_aggregations", {}) or {}):
         regions = settings.get("region_aggregations", {})[region]
@@ -1540,15 +1549,14 @@ def add_renewables_clusters(
         technologies = [
             k
             for k, v in atb_map.items()
-            if v and all([scenario.get(ki) == vi for ki, vi in v.items()])
+            if all([scenario.get(ki) == vi for ki, vi in v.items()])
         ]
         if not technologies:
             s = (
-                f"You have a renewables_cluster for technology '{scenario.get('technology')} "
+                f"You have a renewables_cluster for technology '{scenario.get('technology')}' "
                 f"in region '{scenario.get('region')}', but no comparable new-build technology "
                 "was specified in your settings file."
             )
-
             logger.warning(s)
             continue
         if len(technologies) > 1:
