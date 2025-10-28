@@ -1253,6 +1253,17 @@ def atb_new_generators(atb_costs, atb_hr, settings, cluster_builder=None):
 
     if new_gen_df.empty:
         results = new_gen_df.copy()
+        # give warnings if they have defined resource clusters that don't have
+        # matching new-build technologies (usually given by
+        # parallel_region_renewables, but that is bypassed when there are no
+        # new-build technologies at all)
+        for cluster in settings.get("renewables_clusters", []):
+            s = (
+                f"You have a renewables_cluster for technology '{cluster.get('technology')}' "
+                f"in region '{cluster.get('region')}', but no comparable new-build technology "
+                "was specified in your settings file."
+            )
+            logger.warning(s)
     else:
         for tech, years in (settings.get("alt_atb_cap_recovery_years") or {}).items():
             new_gen_df.loc[

@@ -1549,6 +1549,9 @@ def add_resource_tags(
             "When assigning regional model tags, the column 'region' is required."
         )
     _df = df.copy()
+    if _df.empty:
+        # don't attempt any assignments on empty dataframe (e.g., no-new-build cases)
+        return _df
     if model_tag_names is None:
         model_tag_names = []
     ignored = r"_"
