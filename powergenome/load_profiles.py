@@ -550,7 +550,7 @@ def add_demand_response_resource_load(load_curves, settings):
             _dr_curves = make_demand_response_profiles(
                 dr_path, dr, settings["model_year"], settings["demand_response"]
             )
-            dr_curves = dr_curves + _dr_curves
+            dr_curves = dr_curves.add(_dr_curves, fill_value=0)
 
     for col in dr_curves.columns:
         try:
