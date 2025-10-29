@@ -1596,28 +1596,19 @@ def add_resource_tags(
     return _df
 
 
-def download_860m(settings: dict) -> pd.ExcelFile:
+def download_860m(fn: str) -> pd.ExcelFile:
     """Load the entire 860m file into memory as an ExcelFile object.
 
     Parameters
     ----------
-    settings : dict
-        User-defined settings loaded from a YAML file. This is where the EIA860m
-        filename is defined as the parameter "eia_860m_fn".
+    fn : str
+        Name of EIA 860m file (basename only) to find and download.
 
     Returns
     -------
     pd.ExcelFile
         The ExcelFile object with all sheets from 860m.
     """
-    fn = settings.get("eia_860m_fn")
-    if not fn:
-        logger.info(
-            "Trying to determine the most recent EIA860m file. For reproducible results "
-            "use the settings parameter 'eia_860m_fn'."
-        )
-        fn = find_newest_860m()
-
     engine = None
     ext = fn.split(".")[-1]
     if ext == "xlsx":
@@ -1644,7 +1635,6 @@ def download_860m(settings: dict) -> pd.ExcelFile:
             )
             download_save(archive_url, local_file)
             eia_860m = pd.ExcelFile(local_file, engine=engine)
-        # write the file to disk
 
     return eia_860m
 
@@ -1673,9 +1663,7 @@ def find_newest_860m() -> str:
     return fn
 
 
-def clean_860m_sheet(
-    eia_860m: pd.ExcelFile, sheet_name: str, settings: dict
-) -> pd.DataFrame:
+def clean_860m_sheet(eia_860m: pd.ExcelFile, sheet_name: str) -> pd.DataFrame:
     """Load a sheet from the 860m ExcelFile object and clean it.
 
     Parameters
@@ -1684,8 +1672,6 @@ def clean_860m_sheet(
         Entire 860m file loaded into memory
     sheet_name : str
         Name of the sheet to load as a dataframe
-    settings : dict
-        User-defined settings loaded from a YAML file.
 
     Returns
     -------
@@ -1693,26 +1679,31 @@ def clean_860m_sheet(
         One of the sheets from 860m
     """
 
-    df = eia_860m.parse(sheet_name=sheet_name, na_values=[" "])
+    eia_860m_parse_args = dict(
+        sheet_name=sheet_name,
+        na_values=[" ", ""],  # mostly " ", but sometimes ""
+        keep_default_na=False,  # some generators use "NA" as a valid ID
+    )
 
-    # Find skiprows and skipfooters, which changes across 860m versions.
-    # NEW: drop rows with all NaN because EIA added a blank row before the footer.
+    # First pass to inspect the data
+    df = eia_860m.parse(**eia_860m_parse_args)
+
+    # Find skiprows and skipfooters, which change across 860m versions.
     sr = 0
-
     for idx, row in df.iterrows():
         if row.iloc[0] == "Entity ID":
             sr = idx + 1
             break
 
     sf = 0
-
     for idx in list(range(-10, 0)):
         if isinstance(df.iloc[idx, 0], str):
             sf = -idx
             break
-    df = eia_860m.parse(
-        sheet_name=sheet_name, skiprows=sr, skipfooter=sf, na_values=[" "]
-    )
+
+    # read again, parsing correctly
+    df = eia_860m.parse(skiprows=sr, skipfooter=sf, **eia_860m_parse_args)
+    # Newer sheets have a blank row before the footer
     df = df.dropna(how="all")
     df = df.rename(columns=planned_col_map)
     df["plant_id_eia"] = df["plant_id_eia"].astype("Int64")
@@ -1723,8 +1714,23 @@ def clean_860m_sheet(
         )
 
     df.columns = snake_case_col(df.columns)
-
     return df
+
+
+def mod_time(path: Union[Path, str]) -> float:
+    """Find modification time for file
+    Parameters
+    ----------
+    path : Union[Path, str]
+        path to file to check the modification time for
+
+    Returns
+    -------
+    float
+        The Unix timestamp for the file modification time, or -1 if it doesn't exist.
+    """
+    p = Path(path)
+    return p.stat().st_mtime if p.exists() else -1
 
 
 def load_860m(settings: dict) -> Dict[str, pd.DataFrame]:
@@ -1750,33 +1756,35 @@ def load_860m(settings: dict) -> Dict[str, pd.DataFrame]:
 
     fn = settings.get("eia_860m_fn")
     if not fn:
+        logger.info(
+            "Trying to determine the most recent EIA860m file. For reproducible "
+            "results use the settings parameter 'eia_860m_fn'."
+        )
         fn = find_newest_860m()
 
     fn_name = Path(fn).stem
+    fn_path = DATA_PATHS["eia_860m"] / fn
 
     data_dict = {}
     eia_860m_excelfile = None
     for name, sheet in sheet_map.items():
         pkl_path = DATA_PATHS["eia_860m"] / f"{fn_name}_{name}.pkl"
-        if pkl_path.exists():
+        pkl_mod_time = mod_time(pkl_path)
+        if pkl_mod_time > mod_time(__file__) and pkl_mod_time > mod_time(fn_path):
+            # Use cached worksheet, but not if this module or the downloaded xlsx file
+            # has changed more recently, in case clean_860m_sheet behavior or the xlsx
+            # file has been updated.
             data_dict[name] = pd.read_pickle(pkl_path)
-            if sheet == "Planned":
-                data_dict[name] = filter_op_status_codes(
-                    data_dict[name], settings.get("proposed_status_included")
-                )
-            data_dict[name]["plant_id_eia"] = data_dict[name]["plant_id_eia"].astype(
-                "Int64"
-            )
-            data_dict[name].columns = snake_case_col(data_dict[name].columns)
         else:
+            # Retrieve, process and cache workbook and worksheets
             if eia_860m_excelfile is None:
-                eia_860m_excelfile = download_860m(settings)
-            data_dict[name] = clean_860m_sheet(eia_860m_excelfile, sheet, settings)
-            if sheet == "planned":
-                data_dict[name] = filter_op_status_codes(
-                    data_dict[name], settings.get("proposed_status_included")
-                )
+                eia_860m_excelfile = download_860m(fn)
+            data_dict[name] = clean_860m_sheet(eia_860m_excelfile, sheet)
             data_dict[name].to_pickle(pkl_path)
+        if sheet == "Planned":
+            data_dict[name] = filter_op_status_codes(
+                data_dict[name], settings.get("proposed_status_included")
+            )
 
     return data_dict
 
