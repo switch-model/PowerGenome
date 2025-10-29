@@ -1785,6 +1785,11 @@ def load_860m(settings: dict) -> Dict[str, pd.DataFrame]:
             data_dict[name] = filter_op_status_codes(
                 data_dict[name], settings.get("proposed_status_included")
             )
+        elif sheet == "Operating":
+            # drop long-term out-of-service generators (same as load_generator_860_data())
+            data_dict[name] = data_dict[name].query(
+                "~operational_status.str.contains('(OS)', regex=False)"
+            )
 
     return data_dict
 
