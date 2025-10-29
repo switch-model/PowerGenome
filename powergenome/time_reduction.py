@@ -50,7 +50,7 @@ def max_rep_periods(
         }
     )
     for Period_Index in time_series_mapping["Period_Index"]:
-        dayOfYear = days_in_group * Period_Index
+        dayOfYear = (days_in_group * Period_Index - 1) % 365 + 1
         d = datetime.datetime.strptime("{} {}".format(dayOfYear, 2011), "%j %Y")
         time_series_mapping["Month"][Period_Index - 1] = d.month
     rep_point = [f"p{i}" for i in range(1, 1 + num_clusters)]
@@ -128,7 +128,9 @@ def kmeans_time_clustering(
 
         The second list has integer weights of each cluster.
     """
-    logger.info("Reducing time domain from 8760 hours to representative periods")
+    logger.info(
+        f"Reducing time domain from {len(load_profiles)} hours to representative periods"
+    )
     # In cases where each cluster is selected exactly once, skip the clustering entirely
     total_cluster_hours = days_in_group * num_clusters * 24
     if len(load_profiles) - total_cluster_hours < days_in_group * 24:
@@ -192,7 +194,7 @@ def kmeans_time_clustering(
     # Dataframe storing normalized inputs
     norm_tseries = pd.DataFrame(columns=original_col_names)
 
-    hours_per_year = len(input_data)
+    hours_of_input = len(input_data)
 
     # Normalized all load and renewables data 0 and LoadWeight, All Renewables b/w 0
     # and 1
@@ -202,9 +204,7 @@ def kmeans_time_clustering(
     norm_tseries.loc[:, load_col_names] *= load_weight
 
     # Identify hour with maximum system wide load
-    hr_maxSysLoad = (
-        input_data.loc[: total_cluster_hours - 1, load_col_names].sum(axis=1).idxmax()
-    )
+    hr_maxSysLoad = input_data.loc[:, load_col_names].sum(axis=1).idxmax()
     ################################ pre-processing data to create concatenated column
     # of load, pv and wind data
 
@@ -212,7 +212,7 @@ def kmeans_time_clustering(
     # a few days in each sample set
     # Hence annual generation for each zone will not exactly match up with raw data
     # num_data_points = round(hours_per_year / 24 / days_in_group)
-    num_data_points = int(hours_per_year / 24 // days_in_group)
+    num_data_points = int(hours_of_input / 24 // days_in_group)
 
     DataPointAsColumns = [f"p{j}" for j in range(1, num_data_points + 1)]
 
@@ -257,7 +257,7 @@ def kmeans_time_clustering(
     if include_peak_day:  # If peak day in cluster, generate one less cluster
         num_clusters = num_clusters - 1
 
-    # K-means clutering with 100 trials with randomly selected starting values
+    # K-means clutering with n_init trials with randomly selected starting values
     model = KMeans(
         n_clusters=num_clusters, n_init=n_init, init="k-means++", random_state=42
     )
@@ -289,7 +289,7 @@ def kmeans_time_clustering(
         # Select column name closest with the smallest euclidean distance to the mean
         EachClusterRepPoint[k] = min(dist, key=lambda k: dist[k])
 
-        # Creating a list that matches each week to a representative week
+        # Create a list that matches each week to a representative week
         for j in range(EachClusterWeight[k]):
             time_series_mapping = time_series_mapping.append(
                 pd.DataFrame(
@@ -323,15 +323,15 @@ def kmeans_time_clustering(
     # extract month corresponding to each time slot
     time_series_mapping["Month"] = 0
     for Period_Index in time_series_mapping["Period_Index"]:
-        dayOfYear = days_in_group * Period_Index
+        dayOfYear = (days_in_group * Period_Index - 1) % 365 + 1
         d = datetime.datetime.strptime("{} {}".format(dayOfYear, 2011), "%j %Y")
         time_series_mapping["Month"][Period_Index - 1] = d.month
 
-    # Storing selected groupings in a new data frame with appropriate dimensions
+    # Store selected groupings in a new data frame with appropriate dimensions
     # (E.g. load in GW)
     ClusterOutputDataTemp = ModifiedData[EachClusterRepPoint]
 
-    # Selecting rows corresponding to Load in excluded subperiods and exclude them from
+    # Select rows corresponding to Load in excluded subperiods and exclude them from
     # scale factor calculation
     NRowsLoad = len(load_col_names)
     # Excluding grouping with peak hr from scale factor calculation
@@ -342,8 +342,8 @@ def kmeans_time_clustering(
     else:
         Actualdata = ModifiedData.loc[0 : 24 * days_in_group * NRowsLoad - 1, :]
 
-    # Scale factor to adjust total generation in original data set to be equal to scaled
-    # up total generation in sampled data set
+    # Scale factor to adjust total generation in original data set to be equal
+    # to scaled up total generation in sampled data set
     SampleweeksAnnualTWh = sum(
         [
             ClusterOutputDataTemp.loc[
@@ -383,17 +383,17 @@ def kmeans_time_clustering(
         columns=EachClusterRepPoint,
     )
 
-    # Storing weights in final output data column
+    # Store weights in final output data column
     final_output_data["GrpWeight"] = ClusteredWeights.melt(id_vars=None)["value"]
 
-    # Regenerating data organized by time series (columns) and representative time
+    # Regenerate data organized by time series (columns) and representative time
     # periods (hours)
     for i in range(len(new_col_names) - 1):
         final_output_data[new_col_names[i]] = ClusterOutputData.loc[
             ConcatenatedRowNames == new_col_names[i], :
         ].melt(id_vars=None)["value"]
 
-    # Calculating error metrics and Annual profile
+    # Calculate error metrics and Annual profile
     FullLengthOutputs = final_output_data
     for j in range(len(EachClusterWeight)):
         # Selecting rows of the FinalOutputData dataframe to append
@@ -408,7 +408,7 @@ def kmeans_time_clustering(
                 [df_try] * (EachClusterWeight[j] - 1), ignore_index=True
             )
 
-    #  Root mean square error between the duration curves of each time series
+    # Root mean square error between the duration curves of each time series
     # Only conisder the points consider in the k-means clustering - ignoring any days
     # dropped off from original data set  due to rounding
     RMSE = {
@@ -443,16 +443,21 @@ def kmeans_time_clustering(
         rep_period_map
     )
     EachClusterRepPoint = pd.DataFrame(EachClusterRepPoint, columns=["slot"])
+
+    # Calculate weights that add up to 365 days, so these samples add up to
+    # a single representative year
+    reweight = 365 / (sum(EachClusterWeight) * days_in_group)
+    AnnualClusterWeight = [w * reweight for w in EachClusterWeight]
     return (
         {
             "load_profiles": load_df,  # Scaled Output Load and Renewables profiles for the sampled representative groupings
             "resource_profiles": resource_df,
-            "ClusterWeights": EachClusterWeight,  # Weight of each for the representative groupings
+            "ClusterWeights": AnnualClusterWeight,  # Weight of each for the representative groupings
             "AnnualGenScaleFactor": ScaleFactor,  # Scale factor used to adjust load output to match annual generation of original data
             "RMSE": RMSE,  # Root mean square error between full year data and modeled full year data (duration curves)
             "AnnualProfile": FullLengthOutputs,
             "time_series_mapping": time_series_mapping,
         },
         EachClusterRepPoint,
-        EachClusterWeight,
+        AnnualClusterWeight,
     )  # Modeled duration curves GW
