@@ -1577,7 +1577,11 @@ def add_renewables_clusters(
         if any([k in precluster_keys for k in _scenario.keys()]):
             precluster = True
 
-            # Create name suffex with unique id info like turbine_type and pref_site
+        # allow user to shorten cluster cache path (useful on Windows or OneDrive, which 
+        # impose path length limits)
+        shorten_cluster_cache_paths = settings.get('shorten_cluster_cache_paths') is True
+
+        # Create name suffix with unique id info like turbine_type and pref_site
         new_tech_suffix = "_" + "_".join(
             [
                 str(v)
@@ -1602,11 +1606,19 @@ def add_renewables_clusters(
         unique_hash = hash_string_sha256(
             f"{region}_{technology}_{detail_suffix}_UTC{settings.get('utc_offset', 0)}"
         )
+        if shorten_cluster_cache_paths:
+            # take the first 16 bytes to make a shorter path; still very likely to be unique
+            unique_hash = unique_hash[:16]
         cache_cluster_fn = unique_hash + "_cluster_data.parquet"
         cache_site_assn_fn = unique_hash + "_site_assn.parquet"
 
-        sub_folder = settings.get("RESOURCE_GROUPS") or SETTINGS.get("RESOURCE_GROUPS")
-        sub_folder = str(sub_folder).replace("/", "_").replace("\\", "_")
+        RESOURCE_GROUPS_PATH = settings.get("RESOURCE_GROUPS") or SETTINGS.get("RESOURCE_GROUPS")
+        sub_folder = str(RESOURCE_GROUPS_PATH).replace("/", "_").replace("\\", "_")
+        if shorten_cluster_cache_paths:
+            # use short hash instead of full sub_folder name (full path will be
+            # stored in sub_folder/RESOURCE_GROUPS_PATH.txt for later reference)
+            sub_folder = hash_string_sha256(sub_folder)[:16]
+
         cache_folder = Path(
             settings["input_folder"] / "cluster_assignments" / sub_folder
         )
@@ -1620,6 +1632,7 @@ def add_renewables_clusters(
         )
         cache_cluster_fpath = cache_folder / cache_cluster_fn
         cache_site_assn_fpath = cache_folder / cache_site_assn_fn
+        cache_res_groups_path_fpath = cache_folder / "RESOURCE_GROUPS_PATH.txt"
         if precluster is False:
             if cache_cluster_fpath.exists() and cache_site_assn_fpath.exists():
                 clusters = pd.read_parquet(cache_cluster_fpath)
@@ -1701,6 +1714,9 @@ def add_renewables_clusters(
                 clusters["cluster"] = range(1, 1 + len(clusters))
                 data = None
         cache_folder.mkdir(parents=True, exist_ok=True)
+        if not cache_res_groups_path_fpath.exists():
+            with open(cache_res_groups_path_fpath, 'w') as f:
+                f.write(RESOURCE_GROUPS_PATH.as_posix())
         if not cache_cluster_fpath.exists():
             clusters.to_parquet(cache_cluster_fpath)
         if not cache_site_assn_fpath.exists() and data is not None:
