@@ -2636,9 +2636,11 @@ def add_transmission_inv_cost(
         has_total = ~total.isna() & total != 0
         cost[has_total] = total[has_total]
     if cost.isna().any() or (cost == 0).any():
-        logger.warning(
-            "Transmission investment costs are missing or zero for some resources"
-            " and will not be included in the total investment costs."
+        techs = resource_df.loc[cost.isna() | (cost == 0), "technology"].unique()
+        logger.info(
+            "Transmission investment costs are missing or zero for some resources "
+            "and will not be included in the total investment costs. "
+            f"Affected technologies: {', '.join(techs)}"
         )
     resource_df["Inv_Cost_per_MWyr"] += cost
     return resource_df
@@ -3148,7 +3150,7 @@ class GeneratorClusters:
                     "No model parameter values are provided in the settings file for "
                     f"the flexible demand resource '{resource}'. If another resource"
                     " has values under "
-                    "`flexible_demand_resource.<year>.<resource_type>.parameter_values`, "
+                    "`flexible_demand_resources.<year>.<resource_type>.parameter_values`, "
                     f"those columns will have a value of 0 for '{resource}'."
                 )
             for col, value in parameters.get("parameter_values", {}).items():
