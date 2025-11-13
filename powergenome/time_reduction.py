@@ -249,9 +249,9 @@ def kmeans_time_clustering(
         np.repeat(norm_tseries.columns, days_in_group * 24)
     )
     #  Create a new dataframe storing aggregated load and renewables time series
-    ModifiedDataNormalized = make_time_groups(input_data, days_in_group)
+    ModifiedDataNormalized = make_time_groups(norm_tseries, days_in_group)
     # Original data organized in concatenated column
-    ModifiedData = make_time_groups(norm_tseries, days_in_group)
+    ModifiedData = make_time_groups(input_data, days_in_group)
 
     # Eliminate grouping including the hour with largest system load (GW) - this
     # group will be manually included in the outputs
