@@ -1393,7 +1393,6 @@ def parallel_region_renewables(
         copy.deepcopy(settings),
         cluster_builder,
     )
-
     return _df
 
 
@@ -1542,6 +1541,11 @@ def add_renewables_clusters(
         regions.append(region)  # Add model region, sometimes listed in RG file
     else:
         regions = [region]
+
+    # allow user to shorten cluster cache path (useful on Windows or OneDrive, which
+    # impose path length limits)
+    shorten_cluster_cache_paths = settings.get("shorten_cluster_cache_paths") is True
+
     for scenario in copy.deepcopy(settings).get("renewables_clusters", []) or []:
         if scenario["region"] != region:
             continue
@@ -1577,10 +1581,6 @@ def add_renewables_clusters(
         if any([k in precluster_keys for k in _scenario.keys()]):
             precluster = True
 
-        # allow user to shorten cluster cache path (useful on Windows or OneDrive, which 
-        # impose path length limits)
-        shorten_cluster_cache_paths = settings.get('shorten_cluster_cache_paths') is True
-
         # Create name suffix with unique id info like turbine_type and pref_site
         new_tech_suffix = "_" + "_".join(
             [
@@ -1612,7 +1612,9 @@ def add_renewables_clusters(
         cache_cluster_fn = unique_hash + "_cluster_data.parquet"
         cache_site_assn_fn = unique_hash + "_site_assn.parquet"
 
-        RESOURCE_GROUPS_PATH = settings.get("RESOURCE_GROUPS") or SETTINGS.get("RESOURCE_GROUPS")
+        RESOURCE_GROUPS_PATH = settings.get("RESOURCE_GROUPS") or SETTINGS.get(
+            "RESOURCE_GROUPS"
+        )
         sub_folder = str(RESOURCE_GROUPS_PATH).replace("/", "_").replace("\\", "_")
         if shorten_cluster_cache_paths:
             # use short hash instead of full sub_folder name (full path will be
@@ -1715,7 +1717,7 @@ def add_renewables_clusters(
                 data = None
         cache_folder.mkdir(parents=True, exist_ok=True)
         if not cache_res_groups_path_fpath.exists():
-            with open(cache_res_groups_path_fpath, 'w') as f:
+            with open(cache_res_groups_path_fpath, "w") as f:
                 f.write(RESOURCE_GROUPS_PATH.as_posix())
         if not cache_cluster_fpath.exists():
             clusters.to_parquet(cache_cluster_fpath)
@@ -1739,6 +1741,7 @@ def add_renewables_clusters(
                 modify_renewable_group, _scenario.get("group_modifiers")
             )
         )
+
     return pd.concat([df[~mask]] + cdfs, sort=False)
 
 
