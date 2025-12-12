@@ -102,6 +102,10 @@ def make_time_groups(df, days_in_group):
     return result
 
 
+# import line_profiler
+
+
+# @line_profiler.profile
 def kmeans_time_clustering(
     resource_profiles,
     load_profiles,
@@ -240,8 +244,9 @@ def kmeans_time_clustering(
     ################################
     # Convert data from one row per historical hour by one column per profile
     # (resource or load) to one column per possible group (defined by
-    # days_in_group) with profiles concatenated. These are the data points that
-    # will be used for kmeans clustering.
+    # days_in_group) with profiles concatenated. The columns are the data points
+    # that will be used for kmeans clustering, e.g., each column holds one week of
+    # historical data for all resources if the groups are one week long.
 
     # Variable names for the concatenated column (one row per load or resource,
     # per hour in group)
@@ -282,58 +287,65 @@ def kmeans_time_clustering(
     # Create an empty list storing name of each data point
     EachClusterRepPoint = [None] * num_clusters
 
-    # Create a dataframe to store the mapping between representative time period
-    # and the entire year
-    time_series_mapping_dfs = [
-        pd.DataFrame(columns=["Period_Index", "Rep_Period_Index"])
-    ]
+    # Create time_series_mapping dataframe showing the mapping between
+    # historical periods and representative periods (e.g., show which
+    # historical week/groups are assigned to each 1-week sample cluster):
+    # Period_Index   Rep_Period_Index
+    # 1              1
+    # 2              1
+    # ...
+    # 7121           7
+
+    period_index = []
+    rep_period_index = []
 
     for k in range(num_clusters):
-        # Number of points in kth cluster (i.e. label=0)
-        EachClusterWeight[k] = len(model.labels_[model.labels_ == k])
+        # True for all columns (aka groups, points or periods) assigned to
+        # cluster k
+        mask = model.labels_ == k
 
-        # Compute Euclidean distance of each point from centroid of cluster k
-        cols = ClusteringInputDF.columns[model.labels_ == k]
+        # Number of points in kth cluster (e.g., label=0)
+        EachClusterWeight[k] = mask.sum()
+
+        # Names of points belonging to cluster k
+        cluster_cols = ClusteringInputDF.columns[mask]
+
+        # Compute Euclidean distance of each point in cluster k from centroid of
+        # the cluster
         dists = np.linalg.norm(
-            ClusteringInputDF.iloc[:, model.labels_ == k].to_numpy(copy=False).T
+            ClusteringInputDF.iloc[:, mask].to_numpy(copy=False).T
             - model.cluster_centers_[k],
             axis=1,
         )
-        dist = dict(zip(cols, dists))
 
-        # Select column name closest with the smallest euclidean distance to the mean
-        EachClusterRepPoint[k] = min(dist, key=lambda k: dist[k])
+        # Select name of column with the smallest euclidean distance to the mean
+        EachClusterRepPoint[k] = cluster_cols[np.argmin(dists)]
 
-        # Create a list that matches each week to a representative week
-        for j in range(EachClusterWeight[k]):
-            time_series_mapping_dfs.append(
-                pd.DataFrame(
-                    {
-                        "Period_Index": int(
-                            ClusteringInputDF.loc[:, model.labels_ == k].columns[j][1:]
-                        ),
-                        "Rep_Period_Index": k + 1,
-                    },
-                    index=[0],
-                ),
-            )
+        # Create a list that matches each period (e.g., week) in the full dataset
+        # to a representative period; this converts column names like 'p121' to
+        # period indexes like 121
+        period_index_k = [int(c[1:]) for c in cluster_cols]
+        rep_period_index_k = [k + 1] * len(cluster_cols)
+
+        period_index.extend(period_index_k)
+        rep_period_index.extend(rep_period_index_k)
 
     if include_peak_day:
         # appending the week representing peak load
-        time_series_mapping_dfs.append(
-            pd.DataFrame(
-                {
-                    "Period_Index": int(GroupingwithPeakLoad[0][1:]),
-                    "Rep_Period_Index": num_clusters + 1,
-                },
-                index=[0],
-            ),
-        )
+        period_index.append(int(GroupingwithPeakLoad[0][1:]))
+        rep_period_index.append(num_clusters + 1)
 
     # same CSV file that will be used in GenX
-    time_series_mapping = pd.concat(time_series_mapping_dfs, ignore_index=True)
-    time_series_mapping = time_series_mapping.sort_values(by=["Period_Index"])
-    time_series_mapping = time_series_mapping.reset_index(drop=True)
+    time_series_mapping = (
+        pd.DataFrame(
+            {
+                "Period_Index": period_index,
+                "Rep_Period_Index": rep_period_index,
+            }
+        )
+        .sort_values(by=["Period_Index"])
+        .reset_index(drop=True)
+    )
 
     # extract month corresponding to each time slot
     time_series_mapping["Month"] = 0
