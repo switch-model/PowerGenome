@@ -829,16 +829,11 @@ def supplement_generator_860_data(
         )
         .merge(bga[bga_cols], on=["plant_id_eia", "generator_id"], how="left")
     )
-    gens_860_model["unit_id_pg"] = gens_860_model.loc[:, "unit_id_pudl"]
-    gens_860_model.loc[gens_860_model.unit_id_pg.isnull(), "unit_id_pg"] = (
-        gens_860_model.loc[gens_860_model.unit_id_pg.isnull(), "plant_id_eia"].astype(
-            str
-        )
+    gens_860_model["unit_id_pg"] = (
+        gens_860_model["plant_id_eia"].astype(str)
         + "_"
-        + gens_860_model.loc[gens_860_model.unit_id_pg.isnull(), "generator_id"].astype(
-            str
-        )
-    ).to_numpy()
+        + gens_860_model["generator_id"].astype(str)
+    )
 
     # Where summer/winter capacity values are missing set equal to nameplate capacity,
     # but only if all generators within a unit are missing the capacity value
@@ -3644,30 +3639,32 @@ class GeneratorClusters:
                 else:
                     continue
             else:
-                if (
-                    region in alt_cluster_method
-                    and tech in alt_cluster_method[region]["technology_description"]
-                ):
-                    grouped = cluster_by_owner(
-                        df,
-                        self.weighted_ownership,
-                        # self.ownership,
-                        self.plants_860,
-                        region,
-                        tech,
-                        self.settings,
-                    )
+                # self.weighted_ownership is no longer created above.
+                raise ValueError("alt_cluster_method is no longer supported.")
+                # if (
+                #     region in alt_cluster_method
+                #     and tech in alt_cluster_method[region]["technology_description"]
+                # ):
+                #     grouped = cluster_by_owner(
+                #         df,
+                #         self.weighted_ownership,
+                #         # self.ownership,
+                #         self.plants_860,
+                #         region,
+                #         tech,
+                #         self.settings,
+                #     )
 
-                elif num_clusters[region][tech] > 0:
-                    clusters = cluster.KMeans(
-                        n_clusters=num_clusters[region][tech], random_state=6
-                    ).fit(preprocessing.StandardScaler().fit_transform(grouped))
+                # elif num_clusters[region][tech] > 0:
+                #     clusters = cluster.KMeans(
+                #         n_clusters=num_clusters[region][tech], random_state=6
+                #     ).fit(preprocessing.StandardScaler().fit_transform(grouped))
 
-                    grouped["cluster"] = (
-                        clusters.labels_ + 1
-                    )  # Change to 1-index for julia
-                else:
-                    continue
+                #     grouped["cluster"] = (
+                #         clusters.labels_ + 1
+                #     )  # Change to 1-index for julia
+                # else:
+                #     continue
 
             # Saving individual unit data for later analysis (if needed)
             unit_list.append(grouped)
