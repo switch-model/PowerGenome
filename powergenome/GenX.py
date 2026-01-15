@@ -1232,7 +1232,7 @@ def check_resource_tags(df: pd.DataFrame) -> pd.DataFrame:
                     "\n*************************\n"
                     f"The resource {row['technology']} in region {row['region']} does "
                     "not have any assigned resource tags. Check the 'model_tag_values' and "
-                    "'regional_tag_values' parameters in your settings file to make sure"
+                    "'regional_tag_values' parameters in your settings file to make sure "
                     "it is assigned one resource tag type from this list:\n\n"
                     f"{RESOURCE_TAGS}\n"
                 )
