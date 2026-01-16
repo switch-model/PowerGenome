@@ -3021,8 +3021,8 @@ class GeneratorClusters:
         self.coal_fgd = pd.read_csv(DATA_PATHS["coal_fgd"])
 
     def fill_na_heat_rates(self, s):
-        """Fill null heat rate values with the median of the series. Not many null
-        values are expected.
+        """Fill null heat rate values with the median of the series. Not many
+        null values are expected.
 
         Parameters
         ----------
@@ -3032,9 +3032,12 @@ class GeneratorClusters:
         Returns
         -------
         Dataframe
-            Same as input but with any null values replaced by the median.
+            Same as input but with any null values replaced by the median or
+            10.34 (33%) if no median is available.
         """
-        if s.isnull().any():
+        if s.isnull().all():
+            return s.fillna(10.34)  # 33% default rate
+        elif s.isnull().any():
             median_hr = s.median()
             return s.fillna(median_hr)
         else:
