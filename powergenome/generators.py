@@ -1418,7 +1418,7 @@ def calc_unit_cluster_values(
     Returns
     -------
     dataframe
-        Aggragate values for generators in a technology cluster
+        Aggragate values for generators in each technology cluster, indexed by cluster
     """
     # if not clustering units no need to calulate cluster average values
     if len(df) == 1:
@@ -1432,7 +1432,7 @@ def calc_unit_cluster_values(
         if technology:
             df["technology"] = technology
 
-        return df.reset_index().replace(np.inf, 0)
+        return df.reset_index().set_index("cluster", drop=False).replace(np.inf, 0)
 
     # Define a function to compute the weighted mean.
     # The issue here is that the df name needs to be used in the function.
