@@ -1871,17 +1871,25 @@ def label_gen_region(
 
     df = df.dropna(subset=["latitude", "longitude"])
 
-    # Convert the lon/lat values to geo points. Need to add an initial CRS and then
-    # change it to align with the IPM regions
+    # Convert the lon/lat values to geo points
     gdf = gpd.GeoDataFrame(
         df.copy(),
         geometry=gpd.points_from_xy(df.longitude.copy(), df.latitude.copy()),
-        crs="EPSG:4326",
+        crs="EPSG:4326",  # lat/lon coordinate system
     )
-    if gdf.crs != model_regions_gdf.crs:
-        gdf = gdf.to_crs(model_regions_gdf.crs)
 
-    gdf = gpd.sjoin(model_regions_gdf.drop(columns="region"), gdf)
+    # Choose a good CRS for distances in meters within the continental US
+    crs = "EPSG:5070"
+    # Assign gens to the region they are in or the nearest one (e.g., for
+    # offshore wind or a few mislabeled gens on shorelines). Limit match to 250
+    # km, to avoid assigning HI and AK resources to continental US regions.
+    # (250 km is also just big enough to fix Rivard 2 solar plant (67621), which
+    # has a +3 degree latitude error in EIA data)
+    gdf = gpd.sjoin_nearest(
+        gdf.to_crs(crs),
+        model_regions_gdf.drop(columns="region").to_crs(crs),
+        max_distance=250000,
+    )
 
     return gdf
 
