@@ -1,4 +1,5 @@
 "Functions for financial calculation of investment costs from capex and WACC"
+
 import json
 import logging
 from datetime import date
@@ -236,11 +237,17 @@ def get_cpi_data(start_year: int = 1980, end_year: int = None) -> pd.DataFrame:
             monthly_cpi = MonthlyCPI(
                 int(m_data["year"]),
                 int(m_data["period"].lstrip("M")),
-                float(m_data["value"]),
+                float("nan" if m_data["value"] == "-" else m_data["value"]),
             )
             data_list.append(monthly_cpi)
 
         m_cpi_df = pd.DataFrame(data_list)
+        # interpolate to fill missing values (e.g., October 2025)
+        m_cpi_df = m_cpi_df.set_index(
+            12 * (m_cpi_df["year"] - m_cpi_df["year"].min()) + m_cpi_df["period"]
+        ).sort_index(axis=0)
+        m_cpi_df["value"] = m_cpi_df["value"].interpolate(method="linear")
+        # calculate annual average CPI level and number of months of data
         a_cpi_df = m_cpi_df.groupby("year", as_index=False).agg(
             {"period": "count", "value": "mean"}
         )
