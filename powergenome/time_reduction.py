@@ -189,18 +189,22 @@ def kmeans_time_clustering(
         time_series_mapping["Rep_Period"] = time_series_mapping["Rep_Period_Index"].map(
             rep_period_map
         )
+        # Calculate weights that add up to 365 days, so these samples add up to
+        # a single representative year (same as when applying k-means)
+        reweight = 365 / (sum(EachClusterWeight) * days_in_group)
+        AnnualClusterWeight = [w * reweight for w in EachClusterWeight]
         return (
             {
                 "load_profiles": load_df,  # Scaled Output Load and Renewables profiles for the sampled representative groupings
                 "resource_profiles": resource_df,
-                "ClusterWeights": EachClusterWeight,  # Weight of each for the representative groupings
+                "ClusterWeights": AnnualClusterWeight,  # Weight of each for the representative groupings
                 "AnnualGenScaleFactor": 1,  # Scale factor used to adjust load output to match annual generation of original data
                 "RMSE": None,  # Root mean square error between full year data and modeled full year data (duration curves)
                 "AnnualProfile": None,
                 "time_series_mapping": time_series_mapping,
             },
             EachClusterRepPoint,
-            EachClusterWeight,
+            AnnualClusterWeight,
         )
 
     resource_col_names = resource_profiles.columns
