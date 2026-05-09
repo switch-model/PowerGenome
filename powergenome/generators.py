@@ -555,16 +555,20 @@ def label_retirement_year(
             # gen ids are strings, not integers
             gen_id = str(gen_id)
 
-            df.loc[
-                (df["plant_id_eia"] == plant_id) & (df["generator_id"] == gen_id),
-                "retirement_year",
-            ] = ret_year
+            # Sometimes plant_id_eia is a column and sometimes an index level,
+            # so we adapt as needed.
+            if "plant_id_eia" in df.columns:
+                ret_rows = (df["plant_id_eia"] == plant_id) & (
+                    df["generator_id"] == gen_id
+                )
+            else:
+                ret_rows = (df.index.get_level_values("plant_id_eia") == plant_id) & (
+                    df["generator_id"] == gen_id
+                )
 
+            df.loc[ret_rows, "retirement_year"] = ret_year
             i += 1
-            ret_cap += df.loc[
-                (df["plant_id_eia"] == plant_id) & (df["generator_id"] == gen_id),
-                capacity_col,
-            ].sum()
+            ret_cap += df.loc[ret_rows, capacity_col].sum()
 
         end_ret_cap = df.loc[df["retirement_year"] <= model_year, capacity_col].sum()
         logger.debug(f"Ending retirement capacity is {end_ret_cap} MW")
@@ -3336,6 +3340,18 @@ class GeneratorClusters:
         #     self.units_model["heat_rate_mmbtu_mwh"].isnull().any() is False
         # ), "There are still some null heat rate values"
         # from IPython import embed
+
+        # TODO: plant_id_eia, prime_mover_code and energy_source_code_1 are
+        # standard columns in self.gens_860 but only index levels in dataframes
+        # from import_proposed_generators() and import_new_generators(). This
+        # can interfere with helper functions (e.g., requiring workaround code
+        # in label_retirement_year). So it would be good to change
+        # import_proposed_generators() and import_new_generators() to reset the
+        # index before exit and return these as normal columns, then also drop
+        # .reset_index() calls on self.proposed_gens, self.new_860m_gens and
+        # self.units_model refs below. However, this currently creates empty
+        # cluster errors in the region_tech_grouped loop later, so it's deferred
+        # for now.
 
         # embed()
         logger.debug(
