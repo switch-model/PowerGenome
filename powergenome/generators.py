@@ -756,10 +756,11 @@ def supplement_generator_860_data(
        'operating_date', 'boiler_id', 'unit_id_eia', 'unit_id_pudl', 'unit_id_pg,
        'retirement_year']
     """
+    cap_col = settings["capacity_col"]
 
     initial_capacity = (
         gens_860.loc[gens_860["plant_id_eia"].isin(model_region_map["plant_id_eia"])]
-        .groupby("technology_description")[settings["capacity_col"]]
+        .groupby("technology_description")[cap_col]
         .sum()
     )
 
@@ -775,7 +776,7 @@ def supplement_generator_860_data(
             # "plant_name",
             "generator_id",
             # "balancing_authority_code",
-            settings["capacity_col"],
+            cap_col,
             "capacity_mw",
             "energy_source_code_1",
             "energy_source_code_2",
@@ -839,26 +840,23 @@ def supplement_generator_860_data(
         + gens_860_model["generator_id"].astype(str)
     )
 
-    # Where summer/winter capacity values are missing set equal to nameplate capacity,
-    # but only if all generators within a unit are missing the capacity value
-    check_units = gens_860_model.loc[
-        gens_860_model[settings["capacity_col"]].isna()
-    ].groupby(["plant_id_eia", "unit_id_pg"])
-    for (plant_id, unit_id), _df in check_units:
-        if _df[settings["capacity_col"]].isna().all():
-            gens_860_model.loc[
-                (gens_860_model["plant_id_eia"] == plant_id)
-                & (gens_860_model["unit_id_pg"] == unit_id),
-                settings["capacity_col"],
-            ] = gens_860_model.loc[
-                (gens_860_model["plant_id_eia"] == plant_id)
-                & (gens_860_model["unit_id_pg"] == unit_id),
-                "capacity_mw",
-            ]
+    # Where summer/winter capacity values are missing, set equal to nameplate
+    # capacity, but only if all generators within a plant are missing the
+    # capacity value (EIA sometimes assigns aggregated values to some units and
+    # leaves others blank).
+    if cap_col != "capacity_mw":
+        plant_all_missing = (
+            gens_860_model.groupby("plant_id_eia")[cap_col].transform("count").eq(0)
+        )
+        gens_860_model.loc[plant_all_missing, cap_col] = gens_860_model.loc[
+            plant_all_missing, "capacity_mw"
+        ]
+        # Fill other missing values with 0. (Could eventually reallocate the
+        # capacity of the reported units within the plant to the unreported
+        # ones.)
+        gens_860_model[cap_col] = gens_860_model[cap_col].fillna(0)
 
-    merged_capacity = gens_860_model.groupby("technology_description")[
-        settings["capacity_col"]
-    ].sum()
+    merged_capacity = gens_860_model.groupby("technology_description")[cap_col].sum()
     if not np.allclose(initial_capacity.sum(), merged_capacity.sum()):
         for i_idx, i_row in initial_capacity.iteritems():
             if abs(i_row - merged_capacity[i_idx]) / i_row > 0.05:
