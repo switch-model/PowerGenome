@@ -959,6 +959,35 @@ def remove_retired_860m(df, retired_860m):
     return not_retired_df.reset_index(drop=True)
 
 
+def remove_out_of_service_860m(df: pd.DataFrame, out_of_service_860m) -> pd.DataFrame:
+    """Remove generators that 860m shows as being permanently out of service (OS)
+
+    Parameters
+    ----------
+    df : dataframe
+        All of the EIA 860 generators
+    out_of_service_860m : dataframe
+        Records operational status OS from the 860m Operating sheet
+
+    Returns
+    -------
+    dataframe
+        Same as input, but without generators that are out of service
+    """
+    df = create_plant_gen_id(df)
+    out_of_service_860m = create_plant_gen_id(out_of_service_860m)
+    out_of_service = df.loc[
+        df["plant_gen_id"].isin(out_of_service_860m["plant_gen_id"]), :
+    ]
+    in_service_df = df.loc[
+        ~df["plant_gen_id"].isin(out_of_service_860m["plant_gen_id"]), :
+    ]
+    in_service_df = in_service_df.drop(columns="plant_gen_id")
+    if not out_of_service.empty:
+        assert len(df) == len(out_of_service) + len(in_service_df)
+    return in_service_df.reset_index(drop=True)
+
+
 def update_planned_retirement_date_860m(
     df: pd.DataFrame, operating_860m: pd.DataFrame
 ) -> pd.DataFrame:
@@ -1773,23 +1802,24 @@ def load_860m(settings: dict) -> Dict[str, pd.DataFrame]:
             # Use cached worksheet, but not if this module or the downloaded xlsx file
             # has changed more recently, in case clean_860m_sheet behavior or the xlsx
             # file has been updated.
-            logger.info(f"Regenerating {pkl_path.name}.")
-            data_dict[name] = pd.read_pickle(pkl_path)
+            df = pd.read_pickle(pkl_path)
         else:
             # Retrieve, process and cache workbook and worksheets
+            if pkl_path.exists():
+                logger.info(f"Regenerating {pkl_path.name}.")
             if eia_860m_excelfile is None:
                 eia_860m_excelfile = download_860m(fn)
-            data_dict[name] = clean_860m_sheet(eia_860m_excelfile, sheet)
-            data_dict[name].to_pickle(pkl_path)
+            df = clean_860m_sheet(eia_860m_excelfile, sheet)
+            df.to_pickle(pkl_path)
         if sheet == "Planned":
-            data_dict[name] = filter_op_status_codes(
-                data_dict[name], settings.get("proposed_status_included")
-            )
+            df = filter_op_status_codes(df, settings.get("proposed_status_included"))
         elif sheet == "Operating":
-            # drop long-term out-of-service generators (same as load_generator_860_data())
-            data_dict[name] = data_dict[name].query(
-                "~operational_status.str.contains('(OS)', regex=False)"
-            )
+            # drop long-term out-of-service generators like load_generator_860_data()
+            # but also keep a copy so we can drop them from the 860 table too
+            out_of_service = df["operational_status"].str.contains("(OS)", regex=False)
+            data_dict["out_of_service"] = df.loc[out_of_service, :].copy()
+            df = df.loc[~out_of_service, :].copy()
+        data_dict[name] = df
 
     return data_dict
 
@@ -3011,6 +3041,10 @@ class GeneratorClusters:
             self.eia_860m = load_860m(self.settings)
             self.operating_860m = self.eia_860m["operating"]
             self.operating_860m = self.remove_860_duplicates(self.operating_860m)
+            self.out_of_service_860m = self.eia_860m["out_of_service"]
+            self.out_of_service_860m = self.remove_860_duplicates(
+                self.out_of_service_860m
+            )
             self.planned_860m = self.eia_860m["planned"]
             self.planned_860m = self.remove_860_duplicates(self.planned_860m)
             self.canceled_860m = self.eia_860m["canceled"]
@@ -3218,6 +3252,7 @@ class GeneratorClusters:
             )
             .pipe(remove_canceled_860m, self.canceled_860m)
             .pipe(remove_retired_860m, self.retired_860m)
+            .pipe(remove_out_of_service_860m, self.out_of_service_860m)
             .pipe(update_planned_retirement_date_860m, self.operating_860m.copy())
             .pipe(update_operating_date_860m, self.operating_860m.copy())
             .pipe(
