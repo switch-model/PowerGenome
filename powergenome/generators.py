@@ -1773,6 +1773,7 @@ def load_860m(settings: dict) -> Dict[str, pd.DataFrame]:
             # Use cached worksheet, but not if this module or the downloaded xlsx file
             # has changed more recently, in case clean_860m_sheet behavior or the xlsx
             # file has been updated.
+            logger.info(f"Regenerating {pkl_path.name}.")
             data_dict[name] = pd.read_pickle(pkl_path)
         else:
             # Retrieve, process and cache workbook and worksheets
